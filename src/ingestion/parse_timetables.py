@@ -4,6 +4,10 @@ Extracts one row per scheduled vehicle journey (trip), combining
 Operator, Service, and VehicleJourney information.
 
 Tool used: Python's built-in xml.etree.ElementTree
+
+Operating days (days_of_week) are looked up at the Service level first;
+if a specific VehicleJourney overrides this (common in some operators'
+export formats, e.g. Stagecoach), that override takes priority.
 """
 
 import os
@@ -13,6 +17,17 @@ import xml.etree.ElementTree as ET
 
 # TransXChange default namespace — required for all tag lookups
 NS = {'txc': 'http://www.transxchange.org.uk/'}
+
+
+def get_days_of_week(profile_elem):
+    """Extract day-of-week child tag names from a RegularDayType element."""
+    if profile_elem is None:
+        return []
+    days_elem = profile_elem.find('txc:DaysOfWeek', NS)
+    if days_elem is None:
+        return []
+    return [child.tag.split('}')[-1] for child in days_elem]
+
 
 def parse_single_file(filepath):
     """Extract trip-level rows from one TransXChange XML file."""
@@ -37,9 +52,9 @@ def parse_single_file(filepath):
         origin = std_service.find('txc:Origin', NS).text if std_service is not None else None
         destination = std_service.find('txc:Destination', NS).text if std_service is not None else None
 
-        # --- Operating days (Mon-Fri, Sat, Sun etc.) ---
-        days_elem = service_elem.find('.//txc:RegularDayType/txc:DaysOfWeek', NS) if service_elem is not None else None
-        days_of_week = [child.tag.split('}')[-1] for child in days_elem] if days_elem is not None else []
+        # --- Operating days: Service-level default ---
+        service_profile = service_elem.find('.//txc:OperatingProfile/txc:RegularDayType', NS) if service_elem is not None else None
+        service_days = get_days_of_week(service_profile)
 
         start_date_elem = service_elem.find('.//txc:OperatingPeriod/txc:StartDate', NS) if service_elem is not None else None
         operating_start = start_date_elem.text if start_date_elem is not None else None
@@ -49,6 +64,11 @@ def parse_single_file(filepath):
             departure_time = vj.find('txc:DepartureTime', NS)
             journey_code_elem = vj.find('.//txc:JourneyCode', NS)
 
+            # Fallback: this specific VehicleJourney may override operating days
+            vj_profile = vj.find('.//txc:OperatingProfile/txc:RegularDayType', NS)
+            vj_days = get_days_of_week(vj_profile)
+            final_days = vj_days if vj_days else service_days
+
             rows.append({
                 'source_file': os.path.basename(filepath),
                 'operator_name': operator_name,
@@ -57,7 +77,7 @@ def parse_single_file(filepath):
                 'line_name': line_name,
                 'origin': origin,
                 'destination': destination,
-                'days_of_week': ','.join(days_of_week),
+                'days_of_week': ','.join(final_days),
                 'operating_start_date': operating_start,
                 'journey_code': journey_code_elem.text if journey_code_elem is not None else None,
                 'departure_time': departure_time.text if departure_time is not None else None,
@@ -87,6 +107,10 @@ def parse_all_timetables(base_dir="data/raw/timetables"):
 
     df = pd.DataFrame(all_rows)
     print(f"\nTotal trip rows extracted: {len(df)}")
+
+    missing_days = df['days_of_week'].isin(['', None]).sum() if len(df) else 0
+    print(f"Rows still missing days_of_week after fallback: {missing_days}")
+
     return df
 
 
