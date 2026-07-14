@@ -1,0 +1,5 @@
+Model,TP,FN,FP,TN,Recall,Precision
+Logistic Regression (unweighted),0,67832,0,186124,0.0,0.0
+Logistic Regression (class-weighted),0,67832,0,186124,0.0,0.0
+Decision Tree,52,67780,40,186084,0.0008,0.5652
+Random Forest,0,67832,0,186124,0.0,0.0
